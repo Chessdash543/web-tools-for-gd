@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Image Resizer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <h1>Image Resizer</h1>
+
+    <label class="file">
+      Select Images
+      <input type="file" id="files" multiple accept="image/png">
+    </label>
+
+    <div class="row">
+      <select id="preset">
+        <option value="h_m">High → Medium</option>
+        <option value="m_h">Medium → High</option>
+        <option value="h_l">High → Low</option>
+        <option value="l_h">Low → High</option>
+      </select>
+
+      <label class="check">
+        <input type="checkbox" id="rename">
+        Rename files
+      </label>
+    </div>
+
+    <button id="run">Rrocess</button>
+
+    <p id="status"></p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
