@@ -1,42 +1,347 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Image Resizer</title>
-  <link rel="stylesheet" href="style.css">
-  <meta name="description" content="The Image Resizer is a tool for texture makers">
-  <link rel="icon" href="/img/icon.png" type="image/x-icon">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GD Asset Scaler</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #121212;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: #1e1e1e;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            width: 100%;
+            max-width: 450px;
+        }
+        h1 { font-size: 22px; margin-bottom: 20px; text-align: center; color: #667eea; }
+        .upload-area {
+            border: 2px dashed #444;
+            padding: 30px;
+            text-align: center;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-bottom: 20px;
+            transition: 0.3s;
+        }
+        .upload-area:hover { border-color: #667eea; background: #252525; }
+        .res-section { display: flex; gap: 15px; margin-bottom: 20px; }
+        .res-group { flex: 1; }
+        label { display: block; font-size: 12px; margin-bottom: 5px; color: #aaa; text-transform: uppercase; }
+        select {
+            width: 100%;
+            padding: 10px;
+            background: #2d2d2d;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 5px;
+            outline: none;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:disabled { background: #444; cursor: not-allowed; }
+        .status { margin-top: 15px; font-size: 14px; text-align: center; display: none; }
+        .progress { height: 4px; background: #333; margin-top: 10px; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #667eea; width: 0%; transition: 0.2s; }
+    </style>
 </head>
 <body>
-  <div class="app">
-    <h1>Image Resizer</h1>
 
-    <label class="file">
-      Select Images
-      <input type="file" id="files" multiple accept="image/png">
-    </label>
+<div class="container">
+    <h1>GD Asset Scaler</h1>
 
-    <div class="row">
-      <select id="preset">
-        <option value="h_m">High → Medium</option>
-        <option value="m_h">Medium → High</option>
-        <option value="h_l">High → Low</option>
-        <option value="l_h">Low → High</option>
-      </select>
-
-      <label class="check">
-        <input type="checkbox" id="rename">
-        Rename files
-      </label>
+    <div class="upload-area" id="dropZone">
+        <p id="fileCount">Drop The Files</p>
+        <span style="font-size: 12px; color: #666;">PNGs e PLISTs</span>
+        <input type="file" id="fileInput" multiple accept=".png,.plist,.fnt" style="display:none">
     </div>
 
-    <button id="run">Process</button>
+    <div class="res-section">
+        <div class="res-group">
+            <label>Entrada</label>
+            <select id="srcRes">
+                <option value="-uhd">UHD</option>
+                <option value="-hd">HD</option>
+                <option value="">Low</option>
+            </select>
+        </div>
+        <div class="res-group">
+            <label>Saída</label>
+            <select id="dstRes">
+                <option value="-uhd">UHD</option>
+                <option value="-hd" selected>HD</option>
+                <option value="">Low</option>
+            </select>
+        </div>
+    </div>
 
-    <p id="status"></p>
-  </div>
+    <button id="convertBtn" disabled>Import Files</button>
 
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="script.js"></script>
+    <div id="statusArea" class="status">
+        <div id="statusMsg">Processing...</div>
+        <div class="progress"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+</div>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+  const convertBtn = document.getElementById('convertBtn');
+  const srcRes = document.getElementById('srcRes');
+  const dstRes = document.getElementById('dstRes');
+  
+  let selectedFiles = [];
+  
+  // Lógica de Escala conforme solicitado
+  const getScaleFactor = (src, dst) => {
+      if (src === "-uhd" && dst === "-hd") return 0.5;
+      if (src === "-hd" && dst === "-uhd") return 2.0;
+      if (src === "-uhd" && dst === "") return 0.25;
+      if (src === "" && dst === "-uhd") return 4.0;
+      if (src === "-hd" && dst === "") return 0.5; 
+      if (src === "" && dst === "-hd") return 2.0;
+      return 1.0;
+  };
+  
+  dropZone.onclick = () => fileInput.click();
+  fileInput.onchange = (e) => {
+      selectedFiles = Array.from(e.target.files);
+      document.getElementById('fileCount').textContent = `${selectedFiles.length} arquivos selecionados`;
+      convertBtn.disabled = selectedFiles.length === 0;
+  };
+  
+  // --- HELPERS DE PARSE ---
+  function parseRect(s) { const m = s.match(/-?\d+/g); return {x:+m[0], y:+m[1], w:+m[2], h:+m[3]}; }
+  function parsePoint(s) { const m = s.match(/-?\d+/g); return {x:+m[0], y:+m[1]}; }
+  
+  function parsePlist(text) {
+      const doc = new DOMParser().parseFromString(text, "text/xml");
+      const frames = {};
+      const keys = doc.querySelectorAll('dict > key');
+      keys.forEach(k => {
+          if(k.textContent === "frames") {
+              const dict = k.nextElementSibling;
+              for(let i=0; i<dict.children.length; i+=2) {
+                  const fName = dict.children[i].textContent;
+                  const fDict = dict.children[i+1];
+                  frames[fName] = {};
+                  for(let j=0; j<fDict.children.length; j+=2) {
+                      frames[fName][fDict.children[j].textContent] = fDict.children[j+1].textContent || fDict.children[j+1].tagName;
+                  }
+              }
+          }
+      });
+      return frames;
+  }
+  
+  // --- FUNÇÕES DE PROCESSAMENTO ---
+  
+  async function processFont(fntFile, pngFile, factor, outputName) {
+      const text = await fntFile.text();
+      const lines = text.split('\n');
+      const newFntContent = lines.map(line => {
+          if (line.startsWith('page id=')) return line.replace(/file=".*?"/, `file="${outputName}.png"`);
+          if (line.startsWith('common ')) {
+              return line.replace(/(lineHeight|base|scaleW|scaleH)=(\d+)/g, (m, attr, val) => `${attr}=${Math.round(val * factor)}`);
+          }
+          if (line.startsWith('char ')) {
+              return line.replace(/(x|y|width|height|xoffset|yoffset|xadvance)=(\s*-?\d+)/g, (m, attr, val) => `${attr}=${Math.round(val * factor)}`);
+          }
+          return line;
+      }).join('\n');
+    
+      const img = await createImageBitmap(pngFile);
+      const canvas = new OffscreenCanvas(Math.max(1, Math.round(img.width * factor)), Math.max(1, Math.round(img.height * factor)));
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, canvas.width, canvas.height);
+      return { fnt: newFntContent, png: await canvas.convertToBlob({type:"image/png"}) };
+  }
+  
+  async function extractSprites(imageData, frames) {
+      const img = await createImageBitmap(imageData);
+      const sprites = {};
+      for (const [name, data] of Object.entries(frames)) {
+          const rect = parseRect(data.textureRect || data.frame);
+          const size = parsePoint(data.spriteSize || data.sourceColorRect);
+          const offset = parsePoint(data.spriteOffset || data.offset);
+          const sourceSize = parsePoint(data.spriteSourceSize || data.sourceSize);
+          const rotated = data.textureRotated === "true" || data.rotated === "true" || data.textureRotated === true;
+          const canvas = new OffscreenCanvas(sourceSize.x, sourceSize.y);
+          const ctx = canvas.getContext("2d");
+          const destX = (sourceSize.x / 2) - (size.x / 2) + offset.x;
+          const destY = (sourceSize.y / 2) - (size.y / 2) - offset.y;
+          ctx.save();
+          if (rotated) {
+              ctx.translate(destX + size.x / 2, destY + size.y / 2);
+              ctx.rotate(-Math.PI / 2);
+              ctx.drawImage(img, rect.x, rect.y, rect.h, rect.w, -size.y / 2, -size.x / 2, size.y, size.x);
+          } else {
+              ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h, destX, destY, size.x, size.y);
+          }
+          ctx.restore();
+          sprites[name] = { canvas, width: sourceSize.x, height: sourceSize.y, originalData: data };
+      }
+      return sprites;
+  }
+  
+  async function resizeSprites(sprites, factor) {
+      const resized = {};
+      for (const [name, s] of Object.entries(sprites)) {
+          const canvas = new OffscreenCanvas(Math.max(1, s.width*factor), Math.max(1, s.height*factor));
+          const ctx = canvas.getContext("2d");
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(s.canvas, 0, 0, s.width, s.height, 0, 0, canvas.width, canvas.height);
+          resized[name] = { canvas, width: canvas.width, height: canvas.height, originalData: s.originalData };
+      }
+      return resized;
+  }
+  
+  function packSprites(sprites) {
+      const sorted = Object.entries(sprites).sort((a,b) => b[1].height - a[1].height);
+      let atlasW = 2048; let curX = 2, curY = 2, rowH = 0, packed = [];
+      for (const [name, s] of sorted) {
+          if (curX + s.width + 2 > atlasW) { curX = 2; curY += rowH + 2; rowH = 0; }
+          packed.push({ name, sprite: s, x: curX, y: curY });
+          curX += s.width + 2; rowH = Math.max(rowH, s.height);
+      }
+      return { packed, atlasWidth: atlasW, atlasHeight: curY + rowH + 2 };
+  }
+  
+  function createPlist(packed, fileName, scale, w, h) {
+      let s = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist  version="1.0"><dict><key>frames</key><dict>`;
+      packed.forEach(i => {
+          const offX = Math.round(parsePoint(i.sprite.originalData.spriteOffset || "{0,0}").x * scale);
+          const offY = Math.round(parsePoint(i.sprite.originalData.spriteOffset || "{0,0}").y * scale);
+          s += `<key>${i.name}</key><dict><key>frame</key><string>{{${i.x},${i.y}},{${i.sprite.width},${i.sprite.height}}}</string><key>offset</key><string>{${offX},$  {offY}}</string><key>rotated</key><false/><key>sourceColorRect</key><string>{{0,0},{${i.sprite.width},${i.sprite.height}}}</string><key>sourceSize</key><string>  {${i.sprite.width},${i.sprite.height}}</string></dict>`;
+      });
+      s += `</dict><key>metadata</key><dict><key>format</key><integer>2</integer><key>realTextureFileName</key><string>${fileName}</string><key>size</key><string>{${w},$ {h}}</string><key>textureFileName</key><string>${fileName}</string></dict></dict></plist>`;
+      return s;
+  }
+  
+  // --- BOTÃO PRINCIPAL ---
+  convertBtn.onclick = async () => {
+      const zip = new JSZip();
+      const factor = getScaleFactor(srcRes.value, dstRes.value);
+      const dSuffix = dstRes.value;
+
+      // Interface
+      document.getElementById('statusArea').style.display = 'block';
+      const statusMsg = document.getElementById('statusMsg');
+      convertBtn.disabled = true;
+
+      // Filtros de ficheiros (case-insensitive)
+      const allFiles = Array.from(selectedFiles);
+      const pngs = allFiles.filter(f => f.name.toLowerCase().endsWith('.png'));
+      const plists = allFiles.filter(f => f.name.toLowerCase().endsWith('.plist'));
+      const fnts = allFiles.filter(f => f.name.toLowerCase().endsWith('.fnt'));
+
+      // Conjunto para evitar duplicados (ex: não processar o PNG da fonte como imagem comum depois)
+      const processedPngNames = new Set();
+
+      try {
+          // 1. PROCESSAR FONTES (.fnt + .png)
+          statusMsg.textContent = "Processing Fonts...";
+          for (const fnt of fnts) {
+              // Nome base sem extensão e sem sufixo de resolução
+              const baseName = fnt.name.replace(/\.[^/.]+$/, "").replace(/-(uhd|hd)$/i, "");
+
+              // Procura o PNG que faz par com este .fnt
+              const relatedPng = pngs.find(p => p.name.replace(/\.[^/.]+$/, "").replace(/-(uhd|hd)$/i, "") === baseName);
+
+              if (relatedPng) {
+                  const outName = baseName + dSuffix;
+                  const result = await processFont(fnt, relatedPng, factor, outName);
+
+                  zip.file(outName + ".fnt", result.fnt);
+                  zip.file(outName + ".png", result.png);
+
+                  processedPngNames.add(relatedPng.name);
+                  console.log(`Fonte processada: ${baseName}`);
+              }
+          }
+
+          // 2. PROCESSAR SPRITESHEETS (.plist + .png)
+          statusMsg.textContent = "Processing Spritesheets...";
+          for (const plist of plists) {
+              const baseName = plist.name.replace(/\.[^/.]+$/, "").replace(/-(uhd|hd)$/i, "");
+              const relatedPng = pngs.find(p => p.name.replace(/\.[^/.]+$/, "").replace(/-(uhd|hd)$/i, "") === baseName);
+
+              if (relatedPng && !processedPngNames.has(relatedPng.name)) {
+                  const frames = parsePlist(await plist.text());
+                  const sprites = await extractSprites(relatedPng, frames);
+                  const resized = await resizeSprites(sprites, factor);
+                  const { packed, atlasWidth, atlasHeight } = packSprites(resized);
+
+                  const canvas = new OffscreenCanvas(atlasWidth, atlasHeight);
+                  const ctx = canvas.getContext('2d');
+                  packed.forEach(i => ctx.drawImage(i.sprite.canvas, i.x, i.y));
+
+                  const outName = baseName + dSuffix;
+                  zip.file(outName + ".png", await canvas.convertToBlob({type: "image/png"}));
+                  zip.file(outName + ".plist", createPlist(packed, outName + ".png", factor, atlasWidth, atlasHeight));
+
+                  processedPngNames.add(relatedPng.name);
+                  console.log(`Sheet Processed: ${baseName}`);
+              }
+          }
+
+          // 3. PROCESSAR IMAGENS SOLTAS (PNGs que não pertencem a fontes ou sheets)
+          statusMsg.textContent = "Resizing Float Images";
+          for (const png of pngs) {
+              if (!processedPngNames.has(png.name)) {
+                  const baseName = png.name.replace(/\.[^/.]+$/, "").replace(/-(uhd|hd)$/i, "");
+                  const img = await createImageBitmap(png);
+
+                  const canvas = new OffscreenCanvas(
+                      Math.max(1, Math.round(img.width * factor)), 
+                      Math.max(1, Math.round(img.height * factor))
+                  );
+                  const ctx = canvas.getContext('2d');
+                  ctx.imageSmoothingQuality = "high";
+                  ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, canvas.width, canvas.height);
+
+                  const outName = baseName + dSuffix;
+                  zip.file(outName + ".png", await canvas.convertToBlob({type: "image/png"}));
+                  img.close();
+              }
+          }
+
+          // FINALIZAÇÃO E DOWNLOAD
+          statusMsg.textContent = "Gerando arquivo ZIP...";
+          const content = await zip.generateAsync({type: "blob"});
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(content);
+          link.download = `assets_scaled_${dstRes.value || "normal"}.zip`;
+          link.click();
+
+          statusMsg.textContent = "Finished";
+      } catch (error) {
+          console.error(error);
+          statusMsg.textContent = "Error";
+      } finally {
+          convertBtn.disabled = false;
+      }
+  };
+</script>
 </body>
 </html>
