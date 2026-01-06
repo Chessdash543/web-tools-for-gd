@@ -208,11 +208,25 @@
   async function resizeSprites(sprites, factor) {
       const resized = {};
       for (const [name, s] of Object.entries(sprites)) {
-          const canvas = new OffscreenCanvas(Math.max(1, s.width*factor), Math.max(1, s.height*factor));
+          // Garante que o canvas de origem tenha dimensões válidas
+          if (s.width <= 0 || s.height <= 0) continue;
+  
+          // Calcula novas dimensões garantindo no mínimo 1 pixel
+          const newW = Math.max(1, Math.round(s.width * factor));
+          const newH = Math.max(1, Math.round(s.height * factor));
+  
+          const canvas = new OffscreenCanvas(newW, newH);
           const ctx = canvas.getContext("2d");
+          
           ctx.imageSmoothingQuality = "high";
-          ctx.drawImage(s.canvas, 0, 0, s.width, s.height, 0, 0, canvas.width, canvas.height);
-          resized[name] = { canvas, width: canvas.width, height: canvas.height, originalData: s.originalData };
+          ctx.drawImage(s.canvas, 0, 0, s.width, s.height, 0, 0, newW, newH);
+          
+          resized[name] = { 
+              canvas, 
+              width: newW, 
+              height: newH, 
+              originalData: s.originalData 
+          };
       }
       return resized;
   }
@@ -312,15 +326,17 @@
               if (!processedPngNames.has(png.name)) {
                   const baseName = png.name.replace(/\.[^/.]+$/, "").replace(/-(uhd|hd)$/i, "");
                   const img = await createImageBitmap(png);
-
-                  const canvas = new OffscreenCanvas(
-                      Math.max(1, Math.round(img.width * factor)), 
-                      Math.max(1, Math.round(img.height * factor))
-                  );
+              
+                  // Segurança: Evitar dimensões zero
+                  const newW = Math.max(1, Math.round(img.width * factor));
+                  const newH = Math.max(1, Math.round(img.height * factor));
+              
+                  const canvas = new OffscreenCanvas(newW, newH);
                   const ctx = canvas.getContext('2d');
+                  
                   ctx.imageSmoothingQuality = "high";
-                  ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, canvas.width, canvas.height);
-
+                  ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, newW, newH);
+              
                   const outName = baseName + dSuffix;
                   zip.file(outName + ".png", await canvas.convertToBlob({type: "image/png"}));
                   img.close();
